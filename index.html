@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SolarOpt — Energy Optimizer</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sun: #FFB830;
+    --sun-dim: #e09000;
+    --grid-color: #00E5FF;
+    --sell: #69FF47;
+    --bg: #080C14;
+    --bg2: #0D1420;
+    --bg3: #111827;
+    --border: rgba(255,184,48,0.15);
+    --text: #E8EDF5;
+    --muted: #5A6580;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+  }
+
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,184,48,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,184,48,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 24px 60px;
+  }
+
+  /* NAV */
+  nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 0;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 40px;
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--sun);
+  }
+
+  .logo-icon {
+    width: 34px; height: 34px;
+    background: var(--sun);
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 18px; color: #000;
+    animation: pulse-sun 3s ease-in-out infinite;
+  }
+
+  @keyframes pulse-sun {
+    0%,100% { box-shadow: 0 0 0 0 rgba(255,184,48,0.5); }
+    50%      { box-shadow: 0 0 0 12px rgba(255,184,48,0); }
+  }
+
+  .nav-right { display: flex; align-items: center; gap: 20px; }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 6px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem; color: var(--sell);
+  }
+
+  .dot {
+    width: 7px; height: 7px;
+    background: var(--sell); border-radius: 50%;
+    animation: blink 2s ease-in-out infinite;
+  }
+
+  @keyframes blink {
+    0%,100% { opacity: 1; }
+    50%      { opacity: 0.25; }
+  }
+
+  .clock {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.68rem; color: var(--muted);
+  }
+
+  /* PAGE TITLE */
+  .page-title {
+    margin-bottom: 36px;
+  }
+
+  .page-title h1 {
+    font-size: clamp(1.8rem, 4vw, 2.8rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.1;
+  }
+
+  .page-title h1 span { color: var(--sun); }
+
+  .page-title p {
+    color: var(--muted);
+    font-size: 0.9rem;
+    margin-top: 8px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* GRID HELPERS */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .grid-4 { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; }
+
+  /* CARD */
+  .card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 26px;
+    transition: border-color 0.2s;
+  }
+
+  .card:hover { border-color: rgba(255,184,48,0.3); }
+
+  .card-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin-bottom: 4px;
+  }
+
+  .card-sub {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-bottom: 20px;
+  }
+
+  /* KPI CARDS */
+  .kpi-icon { font-size: 1.4rem; margin-bottom: 10px; }
+
+  .kpi-label {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .kpi-val {
+    font-size: 1.7rem;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 4px;
+    transition: all 0.5s;
+  }
+
+  .kpi-hint { font-size: 0.72rem; color: var(--muted); }
+
+  /* INPUTS */
+  .input-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
+
+  label {
+    display: block;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  input[type="number"] {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.85rem;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input[type="number"]:focus { border-color: var(--sun); }
+
+  textarea {
+    width: 100%;
+    background: var(--bg3);
+    border: 1px solid rgba(255,255,255,0.07);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+    outline: none;
+    resize: vertical;
+    transition: border-color 0.2s;
+    line-height: 1.5;
+  }
+
+  textarea:focus { border-color: var(--sun); }
+
+  .field-hint {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* BUTTONS */
+  .btn-run {
+    width: 100%;
+    background: linear-gradient(135deg, var(--sun), var(--sun-dim));
+    color: #000;
+    border: none;
+    padding: 15px;
+    border-radius: 10px;
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: all 0.25s;
+    margin-top: 6px;
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+  }
+
+  .btn-run:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 10px 28px rgba(255,184,48,0.35);
+  }
+
+  .btn-run:disabled { opacity: 0.6; cursor: not-allowed; }
+
+  /* RESULT ROWS */
+  .result-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+  }
+
+  .result-row:last-child { border-bottom: none; }
+
+  .result-lbl { font-size: 0.85rem; color: var(--muted); }
+
+  .result-val {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.9rem;
+    font-weight: 700;
+  }
+
+  .savings-box {
+    background: rgba(105,255,71,0.07);
+    border: 1px solid rgba(105,255,71,0.2);
+    border-radius: 10px;
+    padding: 20px;
+    text-align: center;
+    margin-top: 16px;
+  }
+
+  .savings-pct {
+    font-size: 3rem;
+    font-weight: 800;
+    color: var(--sell);
+    letter-spacing: -0.04em;
+    transition: all 0.5s;
+  }
+
+  .savings-lbl {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.65rem;
+    color: var(--muted);
+    margin-top: 4px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  /* CHART */
+  .chart-wrap {
+    margin-top: 36px;
+    margin-bottom: 24px;
+  }
+
+  .chart-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+  }
+
+  .legend {
+    display: flex; gap: 16px;
+  }
+
+  .leg {
+    display: flex; align-items: center; gap: 6px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.62rem;
+    color: var(--muted);
+  }
+
+  .leg-dot { width: 10px; height: 10px; border-radius: 3px; }
+
+  .chart-bars {
+    display: flex;
+    align-items: flex-end;
+    gap: 3px;
+    height: 160px;
+    padding-bottom: 1px;
+  }
+
+  .bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    height: 100%;
+    justify-content: flex-end;
+    cursor: pointer;
+    position: relative;
+  }
+
+  .bar-segment {
+    width: 100%;
+    border-radius: 3px 3px 0 0;
+    transition: all 0.4s ease;
+    min-height: 2px;
+  }
+
+  .bar-col:hover .bar-segment { filter: brightness(1.3); }
+
+  .bar-col .tooltip {
+    position: absolute;
+    bottom: calc(100% + 6px);
+    left: 50%; transform: translateX(-50%);
+    background: var(--bg3);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 10px;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.58rem;
+    white-space: nowrap;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+    z-index: 10;
+    color: var(--text);
+  }
+
+  .bar-col:hover .tooltip { opacity: 1; }
+
+  .hour-labels {
+    display: flex;
+    gap: 3px;
+    padding-top: 6px;
+  }
+
+  .hour-lbl {
+    flex: 1;
+    text-align: center;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.5rem;
+    color: var(--muted);
+  }
+
+  /* TABLE */
+  .table-wrap {
+    overflow-x: auto;
+    margin-top: 36px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: 'Space Mono', monospace;
+    font-size: 0.72rem;
+  }
+
+  thead th {
+    text-align: left;
+    padding: 8px 12px;
+    color: var(--muted);
+    font-size: 0.6rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border-bottom: 1px solid var(--border);
+  }
+
+  tbody tr {
+    border-bottom: 1px solid rgba(255,255,255,0.03);
+    transition: background 0.15s;
+  }
+
+  tbody tr:hover { background: rgba(255,255,255,0.02); }
+
+  tbody td { padding: 9px 12px; color: var(--text); }
+
+  .td-night { color: var(--muted); }
+  .td-buy   { color: var(--grid-color); }
+  .td-sell  { color: var(--sell); }
+  .td-solar { color: var(--sun); }
+
+  /* STATUS */
+  .status-msg {
+    font-family: 'Space Mono', monospace;
+    font-size: 0.7rem;
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-top: 10px;
+    display: none;
+  }
+
+  .status-msg.error { background: rgba(255,80,80,0.1); color: #ff7070; display: block; }
+  .status-msg.ok    { background: rgba(105,255,71,0.08); color: var(--sell); display: block; }
+
+  @media (max-width: 768px) {
+    .grid-2 { grid-template-columns: 1fr; }
+    .grid-4 { grid-template-columns: 1fr 1fr; }
+    .input-row { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- NAV -->
+  <nav>
+    <div class="logo">
+      <div class="logo-icon">☀</div>
+      SolarOpt
+    </div>
+    <div class="nav-right">
+      <div class="status-pill">
+        <div class="dot"></div>
+        <span id="solver-status">READY</span>
+      </div>
+      <div class="clock" id="clock">--:--:--</div>
+    </div>
+  </nav>
+
+  <!-- TITLE -->
+  <div class="page-title">
+    <h1>On-Grid Solar<br><span>Energy Optimizer</span></h1>
+    <p>// Linear programming dispatch — PuLP CBC Simplex Solver</p>
+  </div>
+
+  <!-- KPI CARDS -->
+  <div class="grid-4" style="margin-bottom:24px">
+    <div class="card">
+      <div class="kpi-icon">☀️</div>
+      <div class="kpi-label">Solar Produced</div>
+      <div class="kpi-val" id="kpi-solar" style="color:var(--sun)">54 kWh</div>
+      <div class="kpi-hint">Daily generation</div>
+    </div>
+    <div class="card">
+      <div class="kpi-icon">⚡</div>
+      <div class="kpi-label">Grid Purchased</div>
+      <div class="kpi-val" id="kpi-bought" style="color:var(--grid-color)">— kWh</div>
+      <div class="kpi-hint">Optimized dispatch</div>
+    </div>
+    <div class="card">
+      <div class="kpi-icon">💚</div>
+      <div class="kpi-label">Energy Sold</div>
+      <div class="kpi-val" id="kpi-sold" style="color:var(--sell)">— kWh</div>
+      <div class="kpi-hint">Feed-in revenue</div>
+    </div>
+    <div class="card">
+      <div class="kpi-icon">💰</div>
+      <div class="kpi-label">Net Savings</div>
+      <div class="kpi-val" id="kpi-savings-pct" style="color:var(--sun)">—%</div>
+      <div class="kpi-hint">vs. no-solar baseline</div>
+    </div>
+  </div>
+
+  <!-- OPTIMIZER + RESULTS -->
+  <div class="grid-2" style="margin-bottom:24px">
+
+    <!-- INPUTS -->
+    <div class="card">
+      <div class="card-title">Configure Parameters</div>
+      <div class="card-sub">Adjust tariffs, load and solar profile, then run</div>
+
+      <div class="input-row">
+        <div>
+          <label>Day Tariff (AMD/kWh)</label>
+          <input type="number" id="day-tariff" value="48.48" step="0.01">
+          <div class="field-hint">06:00 – 22:00</div>
+        </div>
+        <div>
+          <label>Night Tariff (AMD/kWh)</label>
+          <input type="number" id="night-tariff" value="38.48" step="0.01">
+          <div class="field-hint">22:00 – 06:00</div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label>Sell Price (AMD/kWh)</label>
+        <input type="number" id="sell-price" value="18.00" step="0.01">
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label>Hourly Load — q[0..23] (comma separated)</label>
+        <textarea id="load" rows="2">5,5,6,7,8,9,10,11,9,8,7,6,5,5,6,7,8,9,10,11,9,8,7,6</textarea>
+      </div>
+
+      <div style="margin-bottom:18px">
+        <label>Hourly Solar — r[0..23] (comma separated)</label>
+        <textarea id="solar" rows="2">0,0,0,0,0,0,1,2,4,6,8,10,10,8,6,4,2,1,0,0,0,0,0,0</textarea>
+      </div>
+
+      <button class="btn-run" id="run-btn" onclick="runOptimizer()">
+        ⚡ Run LP Optimizer
+      </button>
+      <div class="status-msg" id="status-msg"></div>
+    </div>
+
+    <!-- RESULTS -->
+    <div class="card">
+      <div class="card-title">Optimization Results</div>
+      <div class="card-sub">CBC Simplex solver output</div>
+
+      <div class="result-row">
+        <span class="result-lbl">Solver status</span>
+        <span class="result-val" id="r-status" style="color:var(--muted)">—</span>
+      </div>
+      <div class="result-row">
+        <span class="result-lbl">Baseline cost (no solar)</span>
+        <span class="result-val" id="r-baseline" style="color:var(--muted)">—</span>
+      </div>
+      <div class="result-row">
+        <span class="result-lbl">Optimized cost</span>
+        <span class="result-val" id="r-optimized" style="color:var(--grid-color)">—</span>
+      </div>
+      <div class="result-row">
+        <span class="result-lbl">Savings (AMD)</span>
+        <span class="result-val" id="r-savings" style="color:var(--sell)">—</span>
+      </div>
+      <div class="result-row">
+        <span class="result-lbl">Sell revenue</span>
+        <span class="result-val" id="r-revenue" style="color:var(--sell)">—</span>
+      </div>
+
+      <div class="savings-box">
+        <div class="savings-pct" id="r-pct">—%</div>
+        <div class="savings-lbl">Daily Cost Reduction</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 24H CHART -->
+  <div class="card chart-wrap">
+    <div class="chart-header">
+      <div>
+        <div class="card-title">24-Hour Dispatch Chart</div>
+        <div class="card-sub">Hourly buy / sell / solar breakdown</div>
+      </div>
+      <div class="legend">
+        <div class="leg"><div class="leg-dot" style="background:rgba(0,229,255,0.75)"></div>Buy</div>
+        <div class="leg"><div class="leg-dot" style="background:rgba(105,255,71,0.75)"></div>Sell</div>
+        <div class="leg"><div class="leg-dot" style="background:rgba(255,184,48,0.75)"></div>Solar</div>
+      </div>
+    </div>
+
+    <div class="chart-bars" id="chart-bars">
+      <!-- filled by JS -->
+    </div>
+    <div class="hour-labels" id="hour-labels">
+      <!-- filled by JS -->
+    </div>
+  </div>
+
+  <!-- HOURLY TABLE -->
+  <div class="card table-wrap" style="margin-top:24px">
+    <div class="card-title" style="margin-bottom:4px">Hourly Detail Table</div>
+    <div class="card-sub">Full dispatch schedule after optimization</div>
+    <table id="result-table">
+      <thead>
+        <tr>
+          <th>Hour</th>
+          <th>Period</th>
+          <th>Load (kWh)</th>
+          <th>Solar (kWh)</th>
+          <th>Buy (kWh)</th>
+          <th>Sell (kWh)</th>
+          <th>Tariff</th>
+        </tr>
+      </thead>
+      <tbody id="table-body">
+        <tr><td colspan="7" style="color:var(--muted);padding:20px;text-align:center">Run the optimizer to see hourly results</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+const API = '';   // empty = same origin (FastAPI serves this file)
+
+// ── Clock ───────────────────────────────────────────────────
+setInterval(() => {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('en-GB');
+}, 1000);
+
+// ── Parse comma-separated input ─────────────────────────────
+function parseList(id) {
+  return document.getElementById(id).value
+    .split(',').map(v => parseFloat(v.trim()));
+}
+
+// ── Run optimizer ───────────────────────────────────────────
+async function runOptimizer() {
+  const btn = document.getElementById('run-btn');
+  const msg = document.getElementById('status-msg');
+
+  const load  = parseList('load');
+  const solar = parseList('solar');
+
+  if (load.length !== 24 || solar.length !== 24) {
+    msg.className = 'status-msg error';
+    msg.textContent = '✗ Load and Solar arrays must each have exactly 24 values.';
+    return;
+  }
+
+  const body = {
+    day_tariff:   parseFloat(document.getElementById('day-tariff').value),
+    night_tariff: parseFloat(document.getElementById('night-tariff').value),
+    sell_price:   parseFloat(document.getElementById('sell-price').value),
+    load, solar
+  };
+
+  btn.disabled = true;
+  btn.textContent = '⏳ Solving…';
+  msg.className = 'status-msg';
+  document.getElementById('solver-status').textContent = 'SOLVING…';
+
+  try {
+    const res  = await fetch(`${API}/optimize`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+
+    if (!res.ok) throw new Error(`Server error ${res.status}`);
+    const d = await res.json();
+
+    updateKPIs(d);
+    updateResults(d);
+    renderChart(d.hours);
+    renderTable(d.hours);
+
+    msg.className = 'status-msg ok';
+    msg.textContent = `✓ Optimal solution found in ${new Date().toLocaleTimeString()}`;
+    document.getElementById('solver-status').textContent = 'OPTIMAL';
+
+  } catch (e) {
+    msg.className = 'status-msg error';
+    msg.textContent = `✗ ${e.message} — is the FastAPI server running on port 8000?`;
+    document.getElementById('solver-status').textContent = 'ERROR';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '⚡ Run LP Optimizer';
+}
+
+// ── Update KPI cards ────────────────────────────────────────
+function updateKPIs(d) {
+  document.getElementById('kpi-solar').textContent   = d.total_solar + ' kWh';
+  document.getElementById('kpi-bought').textContent  = d.total_bought + ' kWh';
+  document.getElementById('kpi-sold').textContent    = d.total_sold + ' kWh';
+  document.getElementById('kpi-savings-pct').textContent = d.savings_pct + '%';
+}
+
+// ── Update result panel ─────────────────────────────────────
+function updateResults(d) {
+  document.getElementById('r-status').textContent    = d.status;
+  document.getElementById('r-status').style.color    = d.status === 'Optimal' ? 'var(--sell)' : 'var(--sun)';
+  document.getElementById('r-baseline').textContent  = d.baseline_cost.toLocaleString() + ' AMD';
+  document.getElementById('r-optimized').textContent = d.optimized_cost.toLocaleString() + ' AMD';
+  document.getElementById('r-savings').textContent   = '+' + d.savings.toLocaleString() + ' AMD';
+  document.getElementById('r-revenue').textContent   = d.sell_revenue.toLocaleString() + ' AMD';
+  document.getElementById('r-pct').textContent        = d.savings_pct + '%';
+}
+
+// ── Render bar chart ────────────────────────────────────────
+function renderChart(hours) {
+  const maxVal = Math.max(...hours.map(h => Math.max(h.buy, h.sell, h.solar, 0.1)));
+  const container = document.getElementById('chart-bars');
+  const labelsEl  = document.getElementById('hour-labels');
+  container.innerHTML = '';
+  labelsEl.innerHTML  = '';
+
+  hours.forEach(h => {
+    const col = document.createElement('div');
+    col.className = 'bar-col';
+
+    // tooltip
+    const tip = document.createElement('div');
+    tip.className = 'tooltip';
+    tip.innerHTML = `<b>${h.hour}:00</b><br>Buy: ${h.buy} kWh<br>Sell: ${h.sell} kWh<br>Solar: ${h.solar} kWh`;
+    col.appendChild(tip);
+
+    // segments
+    const segments = [
+      { val: h.solar, color: 'rgba(255,184,48,0.75)' },
+      { val: h.sell,  color: 'rgba(105,255,71,0.75)' },
+      { val: h.buy,   color: 'rgba(0,229,255,0.75)' },
+    ];
+
+    segments.forEach(s => {
+      if (s.val > 0) {
+        const bar = document.createElement('div');
+        bar.className = 'bar-segment';
+        bar.style.background = s.color;
+        bar.style.height = Math.round((s.val / maxVal) * 145) + 'px';
+        col.appendChild(bar);
+      }
+    });
+
+    container.appendChild(col);
+
+    // hour label (every 3 hours)
+    const lbl = document.createElement('div');
+    lbl.className = 'hour-lbl';
+    lbl.textContent = h.hour % 3 === 0 ? h.hour : '';
+    labelsEl.appendChild(lbl);
+  });
+}
+
+// ── Render table ────────────────────────────────────────────
+function renderTable(hours) {
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = hours.map(h => `
+    <tr>
+      <td>${String(h.hour).padStart(2,'0')}:00</td>
+      <td class="${h.period === 'Night' ? 'td-night' : ''}">${h.period}</td>
+      <td>${h.load}</td>
+      <td class="td-solar">${h.solar}</td>
+      <td class="td-buy">${h.buy}</td>
+      <td class="td-sell">${h.sell}</td>
+      <td style="color:var(--muted)">${h.tariff}</td>
+    </tr>
+  `).join('');
+}
+
+// ── Auto-run on load with defaults ──────────────────────────
+window.addEventListener('load', runOptimizer);
+</script>
+</body>
+</html>

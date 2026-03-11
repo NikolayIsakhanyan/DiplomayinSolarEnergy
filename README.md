@@ -346,6 +346,7 @@ $x_{i} \geq 0$ , $x_{i}^{'} \geq 0$
 $$x_{i} + q_{i} = x_{i}^{'} + r_{i\ }
 $$
 ,երբ $\ q_{i} \leq r_{i\ }$ Simplex աղյուսակը կլինի․
+
 ![Table 1](images/table1.png)
   
 ,երբ $q_{i} > r_{i}$ Simplex աղյուսակը կլինի․
