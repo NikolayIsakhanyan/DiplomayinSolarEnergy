@@ -1,24 +1,34 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 import pulp
-import os
 
 app = FastAPI()
+
+
+class BatteryConfig(BaseModel):
+    capacity: float          # B_max (kWh)
+    initial_soc: float       # B_0 (kWh)
+    charge_efficiency: float = 0.95   # eta_ch
+    discharge_efficiency: float = 0.95  # eta_dis
+    degradation_cost: float  # d (AMD/kWh per cycle)
+
 
 class OptimizeRequest(BaseModel):
     day_tariff: float
     night_tariff: float
     sell_price: float
-    load: List[float]
-    solar: List[float]
+    load: List[float]          # r_i — load demand per hour
+    solar: List[float]         # q_i — solar production per hour
+    battery: Optional[BatteryConfig] = None
+
 
 @app.get("/", response_class=HTMLResponse)
 def index():
     with open("index.html", "r", encoding="utf-8") as f:
         return f.read()
+
 
 @app.post("/optimize")
 def optimize(req: OptimizeRequest):
@@ -27,24 +37,50 @@ def optimize(req: OptimizeRequest):
     def tariff(h):
         return req.day_tariff if 6 <= h < 22 else req.night_tariff
 
-    # LP problem
     prob = pulp.LpProblem("SolarOpt", pulp.LpMinimize)
 
     buy  = [pulp.LpVariable(f"buy_{h}",  lowBound=0) for h in hours]
     sell = [pulp.LpVariable(f"sell_{h}", lowBound=0) for h in hours]
 
-    # Objective: minimize cost of buying - revenue from selling
-    prob += pulp.lpSum(
-        buy[h] * tariff(h) - sell[h] * req.sell_price for h in hours
-    )
+    has_battery = req.battery is not None
+    if has_battery:
+        bat = req.battery
+        charge    = [pulp.LpVariable(f"ch_{h}",  lowBound=0) for h in hours]
+        discharge = [pulp.LpVariable(f"dis_{h}", lowBound=0) for h in hours]
+        soc       = [pulp.LpVariable(f"soc_{h}", lowBound=0, upBound=bat.capacity) for h in hours]
 
-    # Constraints: energy balance each hour
-    for h in hours:
-        prob += buy[h] + req.solar[h] - sell[h] == req.load[h]
+        # Objective with degradation cost
+        prob += pulp.lpSum(
+            buy[h] * tariff(h)
+            - sell[h] * req.sell_price
+            + discharge[h] * bat.degradation_cost
+            for h in hours
+        )
+
+        # Energy balance: solar + buy + discharge = load + sell + charge
+        for h in hours:
+            prob += (
+                req.solar[h] + buy[h] + discharge[h]
+                == req.load[h] + sell[h] + charge[h]
+            )
+
+        # Battery SOC evolution
+        for h in hours:
+            if h == 0:
+                prob += soc[h] == bat.initial_soc + bat.charge_efficiency * charge[h] - (1 / bat.discharge_efficiency) * discharge[h]
+            else:
+                prob += soc[h] == soc[h-1] + bat.charge_efficiency * charge[h] - (1 / bat.discharge_efficiency) * discharge[h]
+
+    else:
+        # No battery
+        prob += pulp.lpSum(
+            buy[h] * tariff(h) - sell[h] * req.sell_price for h in hours
+        )
+        for h in hours:
+            prob += buy[h] + req.solar[h] - sell[h] == req.load[h]
 
     prob.solve(pulp.PULP_CBC_CMD(msg=0))
 
-    # Results
     total_bought = round(sum(pulp.value(buy[h])  for h in hours), 2)
     total_sold   = round(sum(pulp.value(sell[h]) for h in hours), 2)
     total_solar  = round(sum(req.solar), 2)
@@ -61,7 +97,7 @@ def optimize(req: OptimizeRequest):
 
     hour_data = []
     for h in hours:
-        hour_data.append({
+        row = {
             "hour":   h,
             "period": "Day" if 6 <= h < 22 else "Night",
             "load":   round(req.load[h], 2),
@@ -69,15 +105,14 @@ def optimize(req: OptimizeRequest):
             "buy":    round(pulp.value(buy[h]), 2),
             "sell":   round(pulp.value(sell[h]), 2),
             "tariff": tariff(h),
-        })
+        }
+        if has_battery:
+            row["charge"]    = round(pulp.value(charge[h]), 2)
+            row["discharge"] = round(pulp.value(discharge[h]), 2)
+            row["soc"]       = round(pulp.value(soc[h]), 2)
+        hour_data.append(row)
 
-
-
-    if __name__ == "__main__":
-            import uvicorn
-            uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
-
-    return {
+    result = {
         "status":         pulp.LpStatus[prob.status],
         "baseline_cost":  baseline_cost,
         "optimized_cost": optimized_cost,
@@ -88,4 +123,18 @@ def optimize(req: OptimizeRequest):
         "total_bought":   total_bought,
         "total_sold":     total_sold,
         "hours":          hour_data,
+        "has_battery":    has_battery,
     }
+
+    if has_battery:
+        total_charged    = round(sum(pulp.value(charge[h])    for h in hours), 2)
+        total_discharged = round(sum(pulp.value(discharge[h]) for h in hours), 2)
+        result["total_charged"]    = total_charged
+        result["total_discharged"] = total_discharged
+
+    return result
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
