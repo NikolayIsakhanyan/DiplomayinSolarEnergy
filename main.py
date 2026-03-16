@@ -8,19 +8,19 @@ app = FastAPI()
 
 
 class BatteryConfig(BaseModel):
-    capacity: float          # B_max (kWh)
-    initial_soc: float       # B_0 (kWh)
-    charge_efficiency: float = 0.95   # eta_ch
-    discharge_efficiency: float = 0.95  # eta_dis
-    degradation_cost: float  # d (AMD/kWh per cycle)
+    capacity: float
+    initial_soc: float
+    charge_efficiency: float = 0.95
+    discharge_efficiency: float = 0.95
+    degradation_cost: float
 
 
 class OptimizeRequest(BaseModel):
     day_tariff: float
     night_tariff: float
     sell_price: float
-    load: List[float]          # r_i — load demand per hour
-    solar: List[float]         # q_i — solar production per hour
+    load: List[float]
+    solar: List[float]
     battery: Optional[BatteryConfig] = None
 
 
