@@ -1,3 +1,527 @@
+# SolarOpt — Արևային Էներգիայի Օպտիմիզատոր
+
+> **API-ի և կոդի տեխնիկական փաստաթուղթ**
+
+| Հատկանիշ | Արժեք |
+|---|---|
+| Տարբերակ | 1.0 |
+| Backend | FastAPI (Python 3.10+) |
+| Solver | PuLP — CBC Simplex |
+| Frontend | HTML5 / Vanilla JavaScript |
+| Տվյալների ձևաչափ | JSON (.json / .txt) |
+
+---
+
+
+
+## Ընդհանուր նկարագրություն
+
+**SolarOpt**-ը վեբ-հավելված է, որը թույլ է տալիս օպտիմալ կերպով կառավարել ցանցային արևային էներգետիկ համակարգի ամենօրյա բաշխումը։ Համակարգը հաշվարկում է ամեն ժամ.
+
+- Որքա՞ն kWh էներգիա գնել ցանցից
+- Որքա՞ն  kWh վաճառել ցանցին
+- Որքա՞ն  kWh լիցքավորել մարտկոցը
+- Որքա՞ն kWh լիցքաթափել մարտկոցը
+
+Հիմնական նպատակը ցերեկային ծախսերի նվազեցումն է՝ արևային արտադրանքը և մարտկոցը առավելագույնս օգտագործելով։
+
+###  Հիմնական հնարավորություններ
+
+-  24-ժամյա ժամային LP օպտիմալացում (գնել/վաճառել dispatch)
+-  Կամընտիր մարտկոցի ինտեգրում SOC-ի հետևմամբ
+-  Ցերեկային/գիշերային սակագների տարբերակում
+-  Feed-in (վաճառքի) սակագնի աջակցություն
+-  Մարտկոցի մաշվածության ծախսի մոդելավորում
+-  JSON ֆայլի ներմուծում (drag & drop կամ browse)
+-  24-ժամյա dispatch chart և ժամային աղյուսակ
+
+###  Ճարտարապետության ակնարկ
+
+| Բաղադրիչ | Տեխնոլոգիա | Պատասխանատվություն |
+|---|---|---|
+| Backend API | FastAPI (Python) | LP ձևակերպում, CBC solver, JSON պատասխան |
+| Օպտիմիզատոր | PuLP + CBC Simplex | LP խնդրի լուծում (min cost dispatch) |
+| Frontend | HTML5 / Vanilla JS | Պարամետրերի input, ֆայլ upload, chart & table |
+| Տվյալների input | JSON (.json / .txt) | Կառուցված input ֆայլ բոլոր պարամետրերով |
+
+---
+
+##  Տեղադրում և գործարկում
+
+###  Կախվածություններ (dependencies)
+
+| Փաթեթ | Տարբերակ | Նպատակ |
+|---|---|---|
+| Python | 3.10+ | Գործարկման միջավայր |
+| fastapi | latest | Վեբ-framework |
+| uvicorn | latest | ASGI server |
+| pulp | latest | LP մոդելավորում + CBC solver |
+| pydantic | v2 | Request validation |
+
+###  Տեղադրում
+
+```bash
+pip install fastapi uvicorn pulp pydantic
+```
+
+
+
+Դրանից հետո browser-ում բացեք՝ `http://localhost:8000`
+
+
+###  Ֆայլերի կառուցվածք
+
+```
+project/
+  main.py               # FastAPI backend + LP optimizer
+  index.html            # Frontend (served by FastAPI)
+  example_input.json    # JSON template ֆայլ
+```
+
+---
+
+##  Backend կոդի բացատրություն (`main.py`)
+
+###  FastAPI հավելված
+
+`main.py` ֆայլը FastAPI հավելվածն է, որը ստանձնում է HTTP request-ների ընդունումը, LP խնդրի ձևակերպումն ու լուծումը, և JSON ֆորմատով արդյունքների վերադարձը։
+
+```python
+from pathlib import Path
+from fastapi import FastAPI
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from routers.optimize import router
+
+app = FastAPI()
+```
+
+>  FastAPI-ն ավտոմատ կերպով ստեղծում է `/docs` endpoint՝ Swagger UI-ով, որտեղ կարելի է թեստավորել API-ն։
+
+###  Pydantic մոդելներ (request validation)
+
+Pydantic մոդելները ապահովում են ավտոմատ վալիդացիա։ FastAPI-ն ստուգում է, որ ուղարկված JSON-ը համապատասխանում է մոդելի կառուցվածքին։
+
+#### `BatteryConfig`
+
+Մարտկոցի կոնֆիգուրացիայի մոդել.
+
+```python
+class BatteryConfig(BaseModel):
+    capacity: float
+    initial_soc: float
+    charge_efficiency: float = 0.95
+    discharge_efficiency: float = 0.95
+    degradation_cost: float
+```
+
+#### `OptimizeRequest`
+
+Օպտիմիզացիայի հիմնական request մոդել.
+
+```python
+class OptimizeRequest(BaseModel):
+    day_tariff: float
+    night_tariff: float
+    sell_price: float
+    load: List[float]
+    solar: List[float]
+    battery: Optional[BatteryConfig] = None
+```
+
+> `Optional[BatteryConfig] = None` նշանակում է, որ `battery` դաշտն ըստ default-ի `None` է, այսինքն՝ մարտկոցն անջատված է։
+
+###  Tariff ֆունկցիա
+
+Ամեն ժամի համար սահմանվում է գնման սակագինը՝ ըստ ժամի.
+
+```python
+def tariff(h):
+    return req.day_tariff if 6 <= h < 22 else req.night_tariff
+```
+
+`6:00–22:00` ժամերին կիրառվում է ցերեկային սակագինը, մյուս բոլոր ժամերին՝ գիշերային սակագինը։
+
+###  LP փոփոխականների ստեղծում
+
+PuLP-ի `LpVariable`-ները ստեղծվում են 24 ժամի համար։ `buy[h]` ու `sell[h]` ամեն ժամի համար, `lowBound=0` (բացասական արժեք անհնար է).
+
+```python
+prob = pulp.LpProblem("SolarOpt", pulp.LpMinimize)
+
+buy  = [pulp.LpVariable(f"buy_{h}",  lowBound=0) for h in hours]
+sell = [pulp.LpVariable(f"sell_{h}", lowBound=0) for h in hours]
+```
+
+Battery-ի դեպքում ավելանում են.
+
+```python
+charge    = [pulp.LpVariable(f"ch_{h}",  lowBound=0) for h in hours]
+discharge = [pulp.LpVariable(f"dis_{h}", lowBound=0) for h in hours]
+soc       = [pulp.LpVariable(f"soc_{h}", lowBound=0,
+                              upBound=bat.capacity) for h in hours]
+```
+
+###  Objective function (նպատակային ֆունկցիա)
+
+Առանց մարտկոցի՝ նպատակը minimize անել գնման ծախսը՝ հանած վաճառքի եկամուտը.
+
+```python
+prob += pulp.lpSum(
+    buy[h] * tariff(h) - sell[h] * req.sell_price
+    for h in hours
+)
+```
+
+Մարտկոցի դեպքում ավելանում է degradation cost.
+
+```python
+prob += pulp.lpSum(
+    buy[h] * tariff(h)
+    - sell[h] * req.sell_price
+    + discharge[h] * bat.degradation_cost
+    for h in hours
+)
+```
+
+###  Constraint-ներ (սահմանափակումներ)
+
+**Առանց մարտկոցի** — ամեն ժամ կատարվում է էներգիայի հաշվեկշռի ստուգում.
+
+```python
+for h in hours:
+    prob += buy[h] + req.solar[h] - sell[h] == req.load[h]
+```
+
+**Մարտկոցի դեպքում** — ընդլայնված էներգիայի հաշվեկշիռ.
+
+```python
+for h in hours:
+    prob += (
+        req.solar[h] + buy[h] + discharge[h]
+        == req.load[h] + sell[h] + charge[h]
+    )
+```
+
+SOC-ի դինամիկան (state of charge evolution).
+
+```python
+for h in hours:
+    if h == 0:
+        prob += soc[h] == bat.initial_soc \
+                + bat.charge_efficiency * charge[h] \
+                - (1 / bat.discharge_efficiency) * discharge[h]
+    else:
+        prob += soc[h] == soc[h-1] \
+                + bat.charge_efficiency * charge[h] \
+                - (1 / bat.discharge_efficiency) * discharge[h]
+```
+
+###  Solver-ի կանչ
+
+CBC solver-ը գործարկվում է `msg=0` ռեժիմով (silent, առանց console output).
+
+```python
+prob.solve(pulp.PULP_CBC_CMD(msg=0))
+```
+
+###  Արդյունքների հաշվարկ
+
+Solver-ի ավարտից հետո հաշվարկվում են ամփոփ ցուցանիշները.
+
+```python
+total_bought = round(sum(pulp.value(buy[h])  for h in hours), 2)
+total_sold   = round(sum(pulp.value(sell[h]) for h in hours), 2)
+total_solar  = round(sum(req.solar), 2)
+
+optimized_cost = round(sum(
+    pulp.value(buy[h]) * tariff(h)
+    - pulp.value(sell[h]) * req.sell_price
+    for h in hours
+), 2)
+
+baseline_cost = round(sum(
+    req.load[h] * tariff(h) for h in hours
+), 2)
+
+savings     = round(baseline_cost - optimized_cost, 2)
+savings_pct = round((savings / baseline_cost) * 100, 1)
+```
+
+> `baseline_cost`-ը ցույց է տալիս, թե ինչ կծախսվեր, եթե արևային էներգիա չլիներ. ամբողջ load-ը կգնվեր ցանցից։
+
+---
+
+##  API Reference
+
+### `GET /`
+
+Endpoint-ը ծառայում է `index.html` frontend ֆայլը։
+
+```python
+@app.get("/")
+def index():
+    return FileResponse(BASE_DIR / "index.html")
+```
+
+| Method | Path | Response |
+|---|---|---|
+| GET | `/` | `index.html` ֆայլի HTML բովանդակությունը |
+
+---
+
+### 4.2 `POST /optimize`
+
+Հիմնական endpoint-ը։ Ստանում է օպտիմիզացիայի պարամետրերը JSON-ով, գործարկում LP solver-ը, վերադարձնում 24-ժամյա dispatch plan։
+
+```python
+@router.post("/optimize")
+def optimize(req: OptimizeRequest):
+    return run_lp(req)
+```
+
+| Method | Path | Content-Type |
+|---|---|---|
+| POST | `/optimize` | `application/json` |
+
+#### Request Body — Դաշտերի նկարագրություն
+
+| Դաշտ | Տեսակ | Պարտ. | Նկարագրություն |
+|---|---|---|---|
+| `day_tariff` | float | Այո | Ցերեկային գնման սակագին (AMD/kWh), 06:00–22:00 |
+| `night_tariff` | float | Այո | Գիշերային գնման սակագին (AMD/kWh), 22:00–06:00 |
+| `sell_price` | float | Այո | Ցանցին վաճառքի գին (AMD/kWh) |
+| `load` | float[] | Այո | 24 արժեք — ժամային բեռ (kWh), index 0 = 00:00 |
+| `solar` | float[] | Այո | 24 արժեք — ժամային արևային արտ. (kWh) |
+| `battery` | object | Ոչ | Մարտկոցի կոնֆիգ (տե՛ս BatteryConfig) |
+
+#### `BatteryConfig` — Դաշտերի նկարագրություն
+
+| Դաշտ | Տեսակ | Default | Նկարագրություն |
+|---|---|---|---|
+| `capacity` | float | — | B_max — max տարողություն (kWh) |
+| `initial_soc` | float | — | B_0 — սկզբնական SOC (kWh) |
+| `charge_efficiency` | float | 0.95 | eta_ch — լիցքավ. արդ., 0–1 |
+| `discharge_efficiency` | float | 0.95 | eta_dis — լիցքաթ. արդ., 0–1 |
+| `degradation_cost` | float | — | d — մաշվածություն (AMD/kWh) |
+
+#### Response Body — Վերադարձվող դաշտեր
+
+| Դաշտ | Տեսակ | Նկարագրություն |
+|---|---|---|
+| `status` | string | Solver-ի կարգավիճակ՝ `"Optimal"`, `"Infeasible"` և այլն |
+| `baseline_cost` | float | Ծախս առանց արևային (AMD) |
+| `optimized_cost` | float | LP-optimal ծախս (AMD) |
+| `savings` | float | Խնայողություն AMD-ով (baseline − optimized) |
+| `savings_pct` | float | Ծախսի կրճատման տոկոս |
+| `sell_revenue` | float | Ցանցին վաճառքից եկամուտ (AMD) |
+| `total_solar` | float | Ընդհանուր արևային արտ. (kWh) |
+| `total_bought` | float | Ընդհանուր ցանցից գնված (kWh) |
+| `total_sold` | float | Ընդհանուր ցանցին վաճառված (kWh) |
+| `has_battery` | bool | `true` եթե մարտկոցը ակտիվ էր |
+| `total_charged` | float | Ընդ. լիցքավ. (kWh) — battery only |
+| `total_discharged` | float | Ընդ. լիցքաթ. (kWh) — battery only |
+| `hours` | array | 24 ժամային detail object-ների զանգված |
+
+#### `hours[i]` — Ժամային detail object
+
+| Դաշտ | Տեսակ | Նկարագրություն |
+|---|---|---|
+| `hour` | int | Ժամի index (0–23) |
+| `period` | string | `"Day"` կամ `"Night"` |
+| `load` | float | r_i — բեռ (kWh) |
+| `solar` | float | q_i — արևային արտ. (kWh) |
+| `buy` | float | x_i — ցանցից գնված (kWh) |
+| `sell` | float | x_i' — ցանցին վաճառված (kWh) |
+| `tariff` | float | Կիրառված սակագին (AMD/kWh) |
+| `charge` | float | C_i_ch — մարտկ. լիցքավ. (kWh) — battery only |
+| `discharge` | float | D_i — մարտկ. լիցքաթ. (kWh) — battery only |
+| `soc` | float | B_i — SOC ժամի վերջում (kWh) — battery only |
+
+### 4.3 Swagger UI
+
+FastAPI-ն ավտոմատ կերպով ստեղծում է Swagger UI-ն։ Բրաուզերով բացեք.
+
+```
+http://localhost:8000/docs          # Swagger UI
+http://localhost:8000/redoc         # ReDoc UI
+http://localhost:8000/openapi.json  # OpenAPI spec (JSON)
+```
+
+> 💡 Swagger UI-ում կարելի է ուղղակիորեն թեստավորել `/optimize` endpoint-ը՝ JSON body-ն մուտքագրելով բրաուզերից։
+
+---
+
+
+
+
+
+###  Frontend-ի JSON կարդալու կոդ
+
+JavaScript-ի `FileReader` API-ն կարդում է ֆայլը, `JSON.parse`-ով վերծանում, ապա `applyJsonData` ֆունկցիան լրացնում բոլոր input դաշտերը.
+
+```javascript
+function handleJsonFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const data = JSON.parse(e.target.result);
+      applyJsonData(data);
+    } catch (err) {
+      alert("Invalid JSON: " + err.message);
+    }
+  };
+  reader.readAsText(file);
+}
+```
+
+---
+
+##  Frontend կոդի բացատրություն (`index.html`)
+
+###  Request-ի ձևավորում
+
+`buildBody()` ֆունկցիան հավաքում է բոլոր input դաշտերի արժեքները և կառուցում JSON request-ի object-ը.
+
+```javascript
+function buildBody() {
+  const body = {
+    day_tariff:   parseFloat(document.getElementById("day-tariff").value),
+    night_tariff: parseFloat(document.getElementById("night-tariff").value),
+    sell_price:   parseFloat(document.getElementById("sell-price").value),
+    load:  parseList("load"),
+    solar: parseList("solar"),
+  };
+  if (document.getElementById("bat-toggle").checked) {
+    body.battery = { capacity: ..., initial_soc: ..., ... };
+  }
+  return body;
+}
+```
+
+###  API կանչ (fetch)
+
+`runOptimizer()` ֆունկցիան POST request-ն ուղարկում է `/optimize` endpoint-ին.
+
+```javascript
+const res = await fetch("/optimize", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify(body)
+});
+const d = await res.json();
+```
+
+###  Chart-ի rendering
+
+`renderChart()` ֆունկցիան 24 bar-column ստեղծում է՝ ամեն ժամի համար։ Ամեն column կարող է ունենալ մինչև 5 segment (Solar, Sell, Buy, Discharge, Charge).
+
+```javascript
+function renderChart(hours, hasBat) {
+  const maxVal = Math.max(...hours.map(h =>
+    Math.max(h.buy, h.sell, h.solar, ...)
+  ));
+  hours.forEach(h => {
+    // ստեղծել div.bar-col
+    // ամեն segment-ի համար div.bar-segment
+    // height = (val / maxVal) * 145px
+  });
+}
+```
+
+### SOC chart (SVG)
+
+`renderSOC()` ֆունկցիան 24-ժամյա SOC կորը SVG polyline-ով ցուցադրում.
+
+```javascript
+function renderSOC(hours, capacity) {
+  const socs = hours.map(h => h.soc || 0);
+  // x = ժամի index, y = SOC արժեք
+  const pts = socs.map((v, i) => [
+    pad + (i / 23) * (W - 2 * pad),
+    H - pad - (v / capacity) * (H - 2 * pad)
+  ]);
+  svg.innerHTML = `<polyline points="${pts}"
+    stroke="purple" fill="none" stroke-width="2"/>`;
+}
+```
+
+### Աղյուսակ (table)
+
+`renderTable()` ֆունկցիան 24 տող ստեղծում է։ Battery ռեժիմի դեպքում ավելացնում է Charge, Discharge, SOC սյուները.
+
+```javascript
+function renderTable(hours, hasBat) {
+  const batCols = hasBat
+    ? "<th>Charge</th><th>Discharge</th><th>SOC</th>"
+    : "";
+  // thead-ը թարմացնել
+  tbody.innerHTML = hours.map(h => `
+    <tr>
+      <td>${h.hour}:00</td>
+      <td>${h.load}</td> ...
+      ${hasBat ? `<td>${h.charge}</td>...` : ""}
+    </tr>
+  `).join("");
+}
+```
+
+---
+
+##  Սխալների մշակում
+
+###  Backend validation
+
+Pydantic ավտոմատ կերպով **HTTP 422 Unprocessable Entity** error է վերադարձնում, եթե.
+
+- `load` կամ `solar` 24-ից շատ կամ քիչ արժեք ունի
+- `float`-ի փոխարեն `string` է ուղարկված
+- Պարտադիր դաշտ բացակայում է
+
+### Frontend-ի error handling
+
+```javascript
+try {
+  const res = await fetch("/optimize", { ... });
+  if (!res.ok) throw new Error(`Server error ${res.status}`);
+  const d = await res.json();
+  // render results...
+} catch (e) {
+  msg.textContent = `Error: ${e.message}`;
+  // solver-status = "ERROR"
+}
+```
+
+###  Հաճախ հանդիպող սխալներ
+
+| Սխալ | Պատճառ | Լուծում |
+|---|---|---|
+| `Connection refused` | FastAPI server-ը չի աշխատում | `uvicorn main:app --port 8000` գործարկել |
+| `422 Unprocessable Entity` | load/solar ≠ 24 արժեք կամ սխալ տեսակ | JSON ֆայլի կառուցվածքն ստուգել |
+| `Infeasible` status | LP-ն լուծում չունի | Ստուգել, որ solar + load արժեքները ≥ 0 |
+| `Invalid JSON` | JSON ֆայլի syntax error | [JSONLint](https://jsonlint.com)-ով վալիդացնել ֆայլը |
+
+---
+
+## 9. Բառարան (Glossary)
+
+| Տերմին | Բացատրություն |
+|---|---|
+| **FastAPI** | Python-ի արագ HTTP framework՝ ավտոմատ validation-ով |
+| **Pydantic** | Python-ի data validation library, FastAPI-ի հիմքն է |
+| **PuLP** | Python-ի LP modeling library |
+| **CBC** | COIN-OR Branch and Cut — open-source LP solver |
+| **LP** | Linear Programming — գծային ծրագրավորում |
+| **SOC** | State of Charge — մարտկոցում պահեստավ. էներգիա (kWh) |
+| **Dispatch** | Ժամային buy/sell/charge/discharge-ի ժամանակացույց |
+| **Feed-in** | Ցանցին հետ վաճառվող էներգիա |
+| **Baseline** | Ծախս առանց արևային, ամբողջ load-ն ցանցից |
+| **Endpoint** | API-ի URL հասցե, որին HTTP request-ն ուղղվում է |
+| **Swagger UI** | FastAPI-ի ինտերակտիվ API փաստ. `http://localhost:8000/docs` |
+
+---
+
+*SolarOpt v1.0 · FastAPI + PuLP CBC · Battery LP Extension*
 
 #  Ներածություն
 
